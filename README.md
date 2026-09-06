@@ -107,6 +107,17 @@ io.libcni.version    Version, PluginInfo, PluginDecoder
 io.libcni.utils      Validation
 ```
 
+## GraalVM native image
+
+The library ships reachability metadata under
+`META-INF/native-image/io.libcni/libcni-java/`, so a consumer's native build works without their
+running the tracing agent.
+
+It is needed because Gson populates this library's types by reflection, which a native image
+strips by default — and the failure is not a crash. Fields come back null, and a perfectly valid
+CNI config is rejected as `missing 'type'`, which reads like the user's mistake. The whole test
+suite runs as a native image in CI (`./gradlew nativeTest`) so that stays fixed.
+
 ## License
 
 Apache-2.0, following the upstream CNI project. This is an independent port.

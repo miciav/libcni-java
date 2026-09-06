@@ -1,6 +1,10 @@
 plugins {
     `java-library`
     `maven-publish`
+    // Runs the test suite as a native image. Gson populates these types by reflection, which a
+    // native image strips unless told otherwise, and the failure is not a crash: fields come back
+    // null and a valid config is rejected as malformed. The suite is the guard.
+    id("org.graalvm.buildtools.native") version "1.1.12"
 }
 
 group = "io.libcni"
@@ -44,6 +48,19 @@ dependencies {
 tasks.test {
     useJUnitPlatform()
     testLogging { events("failed", "skipped") }
+}
+
+// The metadata under src/main/resources/META-INF/native-image ships in the jar, so a consumer's
+// native build works without their running the tracing agent. It was recorded by running this
+// suite under the agent, then cut down to this library's own types — what the agent also saw of
+// Gradle, JUnit and the test classes has no business in a published library.
+graalvmNative {
+    binaries {
+        named("test") {
+            buildArgs.add("--enable-native-access=ALL-UNNAMED")
+        }
+    }
+    agent { enabled.set(false) }
 }
 
 publishing {

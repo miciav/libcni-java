@@ -1,0 +1,133 @@
+{
+  "reflection": [
+    {
+      "type": "io.libcni.types.CurrentResult",
+      "fields": [
+        {
+          "name": "cniVersion"
+        },
+        {
+          "name": "dns"
+        },
+        {
+          "name": "interfaces"
+        },
+        {
+          "name": "ips"
+        },
+        {
+          "name": "routes"
+        }
+      ],
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": []
+        }
+      ]
+    },
+    {
+      "type": "io.libcni.types.DNS",
+      "fields": [
+        {
+          "name": "nameservers"
+        }
+      ],
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": []
+        }
+      ]
+    },
+    {
+      "type": "io.libcni.types.IPConfig",
+      "fields": [
+        {
+          "name": "address"
+        },
+        {
+          "name": "gateway"
+        },
+        {
+          "name": "iface"
+        },
+        {
+          "name": "version"
+        }
+      ],
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": []
+        }
+      ]
+    },
+    {
+      "type": "io.libcni.types.Interface",
+      "fields": [
+        {
+          "name": "mac"
+        },
+        {
+          "name": "mtu"
+        },
+        {
+          "name": "name"
+        },
+        {
+          "name": "pciID"
+        },
+        {
+          "name": "socketPath"
+        }
+      ],
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": []
+        }
+      ]
+    },
+    {
+      "type": "io.libcni.types.PluginConf",
+      "fields": [
+        {
+          "name": "capabilities"
+        },
+        {
+          "name": "cniVersion"
+        },
+        {
+          "name": "name"
+        },
+        {
+          "name": "type"
+        }
+      ],
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": []
+        }
+      ]
+    },
+    {
+      "type": "io.libcni.types.Route",
+      "fields": [
+        {
+          "name": "dst"
+        },
+        {
+          "name": "gw"
+        }
+      ],
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": []
+        }
+      ]
+    }
+  ]
+}
