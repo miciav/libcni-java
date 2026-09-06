@@ -40,9 +40,16 @@ public class RawExec {
                 process = pb.start();
                 final Process proc = process;
 
-                try (OutputStream os = proc.getOutputStream()) {
-                    os.write(stdinData);
-                }
+                // Write stdin in a background thread: a plugin that exits without
+                // consuming stdin can cause "Stream closed"/"broken pipe", which is
+                // not an error we should surface.
+                Thread stdinWriter = new Thread(() -> {
+                    try (OutputStream os = proc.getOutputStream()) {
+                        os.write(stdinData);
+                    } catch (IOException ignored) {
+                    }
+                });
+                stdinWriter.start();
 
                 Thread stderrReader = new Thread(() -> {
                     try (InputStream es = proc.getErrorStream()) {
@@ -51,9 +58,10 @@ public class RawExec {
                     }
                 });
                 stderrReader.start();
-                try (InputStream in = process.getInputStream()) {
+                try (InputStream in = proc.getInputStream()) {
                     in.transferTo(stdout);
                 }
+                stdinWriter.join();
                 stderrReader.join();
 
                 int exit = process.waitFor();
