@@ -1,3 +1,6 @@
-out/
-lib/
+# Gradle
+build/
+.gradle/
+
+# Java
 *.class

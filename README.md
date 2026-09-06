@@ -10,18 +10,20 @@ the Go library can map it directly.
 
 ## Requirements
 
-- JDK 21+ (developed against OpenJDK 25)
-- Network access on first build to download dependencies (`./build.sh deps`)
+- JDK 21+ to run against (the build uses a 25 toolchain and targets 21 bytecode)
 
 ## Building and testing
 
 ```bash
-./build.sh deps    # downloads Gson + JUnit into lib/ (once)
-./build.sh         # compiles and runs all tests
+./gradlew build                 # compiles and runs all tests
+./gradlew publishToMavenLocal   # installs io.libcni:libcni-java for local consumers
 ```
 
-There is no Maven/Gradle wrapper — `build.sh` drives `javac` and the JUnit
-console launcher directly.
+The build was a `build.sh` driving `javac` directly, which kept the project
+free of a build tool but also meant it could not be depended on: there was no
+artifact to resolve. Gradle replaces it — same sources, same 105 tests — so
+that a runtime like [containerd-java](https://github.com/miciav/containerd-java)
+can consume this as an ordinary dependency.
 
 ## Usage
 
