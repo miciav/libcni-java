@@ -2,15 +2,18 @@ package io.libcni;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import io.libcni.invoke.DefaultExec;
 import io.libcni.types.CniError;
 import io.libcni.types.Result;
 import io.libcni.version.PluginInfo;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -214,5 +217,75 @@ class CNIConfigTest {
         PluginInfo info = cni.getVersionInfo("bridge");
 
         assertEquals(List.of("0.4.0", "1.0.0"), info.supportedVersions());
+    }
+
+    @Test
+    void corruptCachedResultDoesNotAbortDel() throws Exception {
+        FakeExec fe = new FakeExec();
+        fe.resultJson = "{\"cniVersion\":\"0.4.0\",\"ips\":[{\"version\":\"4\",\"address\":\"10.0.0.2/24\"}]}";
+        CNIConfig cni = newCni(fe);
+        NetworkConfigList list = ConfigLoader.networkConfFromBytes(CONFLIST);
+        cni.addNetworkList(list, rt("cid", "/ns", "eth0"));
+
+        Path cacheFile = cacheDir.resolve("results").resolve("mynet-cid-eth0");
+        Files.writeString(cacheFile, "{not json");
+
+        fe.calls.clear();
+        cni.delNetworkList(list, rt("cid", "/ns", "eth0"));
+
+        assertEquals(2, fe.calls.size());
+        assertFalse(Files.exists(cacheFile));
+    }
+
+    @Test
+    void addNetworkListWithNoPluginsReturnsNull() {
+        FakeExec fe = new FakeExec();
+        CNIConfig cni = newCni(fe);
+        NetworkConfigList list = ConfigLoader.networkConfFromBytes("{\"cniVersion\":\"0.4.0\",\"name\":\"mynet\"}");
+
+        assertNull(cni.addNetworkList(list, rt("cid", "/ns", "eth0")));
+    }
+
+    @Test
+    void malformedCniVersionThrowsCniErrorNotIllegalArgument() {
+        FakeExec fe = new FakeExec();
+        CNIConfig cni = newCni(fe);
+        NetworkConfigList list = ConfigLoader.networkConfFromBytes(
+            "{\"cniVersion\":\"0.4.x\",\"name\":\"mynet\",\"plugins\":[{\"type\":\"bridge\"}]}");
+
+        assertThrows(CniError.class, () -> cni.delNetworkList(list, rt("cid", "/ns", "eth0")));
+    }
+
+    @Test
+    void delNetworkListDoesNotDeleteOutsideCacheDir() throws Exception {
+        Path base = Files.createTempDirectory("cni-traversal");
+        Path cache = base.resolve("cache");
+        Files.createDirectories(cache.resolve("results"));
+        Path victim = base.resolve("victim-cid-eth0");
+        Files.writeString(victim, "important");
+
+        FakeExec fe = new FakeExec();
+        CNIConfig cni = new CNIConfig(List.of("/opt/cni/bin"), cache.toString(), fe);
+        NetworkConfigList list = ConfigLoader.networkConfFromBytes(
+            "{\"cniVersion\":\"0.3.1\",\"name\":\"../../victim\",\"plugins\":[{\"type\":\"bridge\"}]}");
+
+        cni.delNetworkList(list, rt("cid", "/ns", "eth0"));
+
+        assertTrue(Files.exists(victim));
+    }
+
+    @Test
+    void getVersionInfoTreatsLegacyPluginAs010(@TempDir Path bin) throws Exception {
+        Path plugin = bin.resolve("legacy");
+        Files.writeString(plugin, "#!/bin/sh\n"
+            + "echo '{\"code\":1,\"msg\":\"unknown CNI_COMMAND: VERSION\"}'\n"
+            + "exit 1\n");
+        plugin.toFile().setExecutable(true);
+
+        CNIConfig cni = new CNIConfig(List.of(bin.toString()), cacheDir.toString(), new DefaultExec());
+
+        PluginInfo info = cni.getVersionInfo("legacy");
+
+        assertEquals(List.of("0.1.0"), info.supportedVersions());
     }
 }

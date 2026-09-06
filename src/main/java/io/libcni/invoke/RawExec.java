@@ -49,6 +49,7 @@ public class RawExec {
                     } catch (IOException ignored) {
                     }
                 });
+                stdinWriter.setDaemon(true);
                 stdinWriter.start();
 
                 Thread stderrReader = new Thread(() -> {
@@ -57,6 +58,7 @@ public class RawExec {
                     } catch (IOException ignored) {
                     }
                 });
+                stderrReader.setDaemon(true);
                 stderrReader.start();
                 try (InputStream in = proc.getInputStream()) {
                     in.transferTo(stdout);

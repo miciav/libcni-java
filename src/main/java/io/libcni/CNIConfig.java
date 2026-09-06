@@ -60,18 +60,13 @@ public class CNIConfig implements CNI {
                     "plugin " + pluginDescription(net.network) + " failed (add): " + e.msg(), e.details());
             }
         }
-        try {
-            cacheAdd(result, list.bytes, list.name, rt);
-        } catch (CniError e) {
-            throw new CniError(e.code(),
-                "failed to set network \"" + list.name + "\" cached result: " + e.msg(), e.details());
-        }
+        cacheAdd(result, list.name, rt);
         return result;
     }
 
     @Override
     public void checkNetworkList(NetworkConfigList list, RuntimeConf rt) {
-        if (!Version.greaterThanOrEqualTo(list.cniVersion, "0.4.0")) {
+        if (!supportsCachedResult(list.cniVersion)) {
             throw new CniError(CniErrorCode.INCOMPATIBLE_CNI_VERSION,
                 "configuration version \"" + list.cniVersion + "\" does not support the CHECK command", "");
         }
@@ -88,13 +83,8 @@ public class CNIConfig implements CNI {
     @Override
     public void delNetworkList(NetworkConfigList list, RuntimeConf rt) {
         Result cachedResult = null;
-        if (Version.greaterThanOrEqualTo(list.cniVersion, "0.4.0")) {
-            try {
-                cachedResult = getCachedResult(list.name, list.cniVersion, rt);
-            } catch (CniError e) {
-                cacheDel(list.name, rt);
-                cachedResult = null;
-            }
+        if (supportsCachedResult(list.cniVersion)) {
+            cachedResult = getCachedResultForDelete(list.name, list.cniVersion, rt);
         }
 
         for (int i = list.plugins.size() - 1; i >= 0; i--) {
@@ -121,18 +111,13 @@ public class CNIConfig implements CNI {
     @Override
     public Result addNetwork(PluginConfig net, RuntimeConf rt) {
         Result result = addNetwork(net.network.name, net.network.cniVersion, net, null, rt);
-        try {
-            cacheAdd(result, net.bytes, net.network.name, rt);
-        } catch (CniError e) {
-            throw new CniError(e.code(),
-                "failed to set network \"" + net.network.name + "\" cached result: " + e.msg(), e.details());
-        }
+        cacheAdd(result, net.network.name, rt);
         return result;
     }
 
     @Override
     public void checkNetwork(PluginConfig net, RuntimeConf rt) {
-        if (!Version.greaterThanOrEqualTo(net.network.cniVersion, "0.4.0")) {
+        if (!supportsCachedResult(net.network.cniVersion)) {
             throw new CniError(CniErrorCode.INCOMPATIBLE_CNI_VERSION,
                 "configuration version \"" + net.network.cniVersion + "\" does not support the CHECK command", "");
         }
@@ -143,13 +128,8 @@ public class CNIConfig implements CNI {
     @Override
     public void delNetwork(PluginConfig net, RuntimeConf rt) {
         Result cachedResult = null;
-        if (Version.greaterThanOrEqualTo(net.network.cniVersion, "0.4.0")) {
-            try {
-                cachedResult = getCachedResult(net.network.name, net.network.cniVersion, rt);
-            } catch (CniError e) {
-                cacheDel(net.network.name, rt);
-                cachedResult = null;
-            }
+        if (supportsCachedResult(net.network.cniVersion)) {
+            cachedResult = getCachedResultForDelete(net.network.name, net.network.cniVersion, rt);
         }
         delNetwork(net.network.name, net.network.cniVersion, net, cachedResult, rt);
         cacheDel(net.network.name, rt);
@@ -204,11 +184,11 @@ public class CNIConfig implements CNI {
 
     private void validatePlugin(String pluginName, String expectedVersion) {
         ensureExec();
-        exec.findInPath(pluginName, path);
+        String pluginPath = exec.findInPath(pluginName, path);
         if (expectedVersion == null || expectedVersion.isEmpty()) {
             expectedVersion = "0.1.0";
         }
-        PluginInfo vi = Invoke.getVersionInfo(exec.findInPath(pluginName, path), exec);
+        PluginInfo vi = Invoke.getVersionInfo(pluginPath, exec);
         for (String v : vi.supportedVersions()) {
             if (v.equals(expectedVersion)) {
                 return;
@@ -333,16 +313,24 @@ public class CNIConfig implements CNI {
             throw new CniError(CniErrorCode.INVALID_ENVIRONMENT_VARIABLES,
                 "cache file path requires network name, container ID, and interface name", "");
         }
+        if (containsPathSeparator(netName) || containsPathSeparator(rt.containerID) || containsPathSeparator(rt.ifName)) {
+            throw new CniError(CniErrorCode.INVALID_ENVIRONMENT_VARIABLES,
+                "cache file path fields must not contain path separators", "");
+        }
         return Path.of(getCacheDir(rt), "results", netName + "-" + rt.containerID + "-" + rt.ifName).toString();
     }
 
-    private void cacheAdd(Result result, String config, String netName, RuntimeConf rt) {
+    private void cacheAdd(Result result, String netName, RuntimeConf rt) {
+        if (result == null) {
+            return;
+        }
         String fname = getCacheFilePath(netName, rt);
         try {
             Files.createDirectories(Path.of(fname).getParent());
             Files.writeString(Path.of(fname), result.toJsonString());
         } catch (IOException e) {
-            throw new CniError(CniErrorCode.IO_FAILURE, "failed to cache result: " + e, "");
+            throw new CniError(CniErrorCode.IO_FAILURE,
+                "failed to set network \"" + netName + "\" cached result: " + e, "");
         }
     }
 
@@ -363,7 +351,13 @@ public class CNIConfig implements CNI {
             // The cached result may simply not exist on disk.
             return null;
         }
-        Result result = ResultFactory.createFromBytes(data);
+        Result result;
+        try {
+            result = ResultFactory.createFromBytes(data);
+        } catch (RuntimeException e) {
+            throw new CniError(CniErrorCode.DECODING_FAILURE,
+                "failed to unmarshal cached result: " + e.getMessage(), "");
+        }
         return result.getAsVersion(cniVersion);
     }
 
@@ -374,5 +368,29 @@ public class CNIConfig implements CNI {
             throw new CniError(e.code(),
                 "failed to get network \"" + netName + "\" cached result: " + e.msg(), e.details());
         }
+    }
+
+    /** True if the CNI version supports cached results (0.4.0+); throws a CniError on a malformed version. */
+    private boolean supportsCachedResult(String cniVersion) {
+        try {
+            return Version.greaterThanOrEqualTo(cniVersion, "0.4.0");
+        } catch (IllegalArgumentException e) {
+            throw new CniError(CniErrorCode.DECODING_FAILURE,
+                "invalid cniVersion \"" + cniVersion + "\": " + e.getMessage(), "");
+        }
+    }
+
+    /** Best-effort cached-result restore for DEL: removes the cache entry on failure. */
+    private Result getCachedResultForDelete(String netName, String cniVersion, RuntimeConf rt) {
+        try {
+            return getCachedResult(netName, cniVersion, rt);
+        } catch (CniError e) {
+            cacheDel(netName, rt);
+            return null;
+        }
+    }
+
+    private static boolean containsPathSeparator(String s) {
+        return s.indexOf('/') >= 0 || s.indexOf('\\') >= 0;
     }
 }
