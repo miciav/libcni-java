@@ -10,6 +10,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import io.libcni.invoke.DefaultExec;
 import io.libcni.types.CniError;
+import io.libcni.types.CurrentResult;
 import io.libcni.types.Result;
 import io.libcni.version.PluginInfo;
 import java.nio.charset.StandardCharsets;
@@ -227,7 +228,7 @@ class CNIConfigTest {
         NetworkConfigList list = ConfigLoader.networkConfFromBytes(CONFLIST);
         cni.addNetworkList(list, rt("cid", "/ns", "eth0"));
 
-        Path cacheFile = cacheDir.resolve("results").resolve("mynet-cid-eth0");
+        Path cacheFile = cacheDir.resolve("results-v2").resolve(CNIConfig.cacheKey("mynet", "cid", "eth0"));
         Files.writeString(cacheFile, "{not json");
 
         fe.calls.clear();
@@ -260,7 +261,7 @@ class CNIConfigTest {
     void delNetworkListDoesNotDeleteOutsideCacheDir() throws Exception {
         Path base = Files.createTempDirectory("cni-traversal");
         Path cache = base.resolve("cache");
-        Files.createDirectories(cache.resolve("results"));
+        Files.createDirectories(cache.resolve("results-v2"));
         Path victim = base.resolve("victim-cid-eth0");
         Files.writeString(victim, "important");
 
@@ -287,5 +288,62 @@ class CNIConfigTest {
         PluginInfo info = cni.getVersionInfo("legacy");
 
         assertEquals(List.of("0.1.0"), info.supportedVersions());
+    }
+
+    @Test
+    void collidingAttachmentsHaveSeparateCacheEntries() {
+        FakeExec fe = new FakeExec();
+        CNIConfig cni = newCni(fe);
+        NetworkConfigList list1 = ConfigLoader.networkConfFromBytes(
+            "{\"cniVersion\":\"0.4.0\",\"name\":\"a-b\",\"plugins\":[{\"type\":\"bridge\"}]}");
+        NetworkConfigList list2 = ConfigLoader.networkConfFromBytes(
+            "{\"cniVersion\":\"0.4.0\",\"name\":\"a\",\"plugins\":[{\"type\":\"bridge\"}]}");
+
+        fe.resultJson = "{\"cniVersion\":\"0.4.0\",\"ips\":[{\"version\":\"4\",\"address\":\"10.0.0.1/24\"}]}";
+        cni.addNetworkList(list1, rt("c", "/ns", "eth0"));    // a-b, c, eth0
+        fe.resultJson = "{\"cniVersion\":\"0.4.0\",\"ips\":[{\"version\":\"4\",\"address\":\"10.0.0.2/24\"}]}";
+        cni.addNetworkList(list2, rt("b-c", "/ns", "eth0"));  // a, b-c, eth0
+
+        assertEquals("10.0.0.1/24",
+            ((CurrentResult) cni.getNetworkListCachedResult(list1, rt("c", "/ns", "eth0"))).ips.get(0).address);
+        assertEquals("10.0.0.2/24",
+            ((CurrentResult) cni.getNetworkListCachedResult(list2, rt("b-c", "/ns", "eth0"))).ips.get(0).address);
+
+        // DEL of one must not disturb the other.
+        cni.delNetworkList(list1, rt("c", "/ns", "eth0"));
+        assertEquals("10.0.0.2/24",
+            ((CurrentResult) cni.getNetworkListCachedResult(list2, rt("b-c", "/ns", "eth0"))).ips.get(0).address);
+    }
+
+    @Test
+    void rejectsCacheEntryWithMismatchedIdentity() throws Exception {
+        FakeExec fe = new FakeExec();
+        CNIConfig cni = newCni(fe);
+        NetworkConfigList list = ConfigLoader.networkConfFromBytes(CONFLIST);
+
+        Path dir = cacheDir.resolve("results-v2");
+        Files.createDirectories(dir);
+        String key = CNIConfig.cacheKey("mynet", "cid", "eth0");
+        Files.writeString(dir.resolve(key),
+            "{\"kind\":\"cniCacheV2\",\"networkName\":\"other\",\"containerId\":\"other\",\"ifName\":\"eth0\","
+                + "\"result\":{\"cniVersion\":\"0.4.0\",\"ips\":[]}}");
+
+        assertNull(cni.getNetworkListCachedResult(list, rt("cid", "/ns", "eth0")));
+    }
+
+    @Test
+    void doesNotDeleteLegacyCacheFiles() throws Exception {
+        Path legacy = cacheDir.resolve("results").resolve("mynet-cid-eth0");
+        Files.createDirectories(legacy.getParent());
+        Files.writeString(legacy, "{\"cniVersion\":\"0.4.0\"}");
+
+        FakeExec fe = new FakeExec();
+        fe.resultJson = "{\"cniVersion\":\"0.4.0\",\"ips\":[{\"version\":\"4\",\"address\":\"10.0.0.2/24\"}]}";
+        CNIConfig cni = newCni(fe);
+        NetworkConfigList list = ConfigLoader.networkConfFromBytes(CONFLIST);
+        cni.addNetworkList(list, rt("cid", "/ns", "eth0"));
+        cni.delNetworkList(list, rt("cid", "/ns", "eth0"));
+
+        assertTrue(Files.exists(legacy));
     }
 }

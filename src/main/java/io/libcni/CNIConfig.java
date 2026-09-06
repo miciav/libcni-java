@@ -1,5 +1,9 @@
 package io.libcni;
 
+import com.google.gson.Gson;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import io.libcni.invoke.Args;
 import io.libcni.invoke.DefaultExec;
 import io.libcni.invoke.Exec;
@@ -14,9 +18,15 @@ import io.libcni.version.PluginInfo;
 import io.libcni.version.Version;
 import java.io.File;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -30,6 +40,8 @@ import java.util.Map;
 public class CNIConfig implements CNI {
 
     public static final String DEFAULT_CACHE_DIR = "/var/lib/cni";
+
+    private static final String CACHE_KIND_V2 = "cniCacheV2";
 
     private final List<String> path;
     private final String cacheDir;
@@ -317,17 +329,46 @@ public class CNIConfig implements CNI {
             throw new CniError(CniErrorCode.INVALID_ENVIRONMENT_VARIABLES,
                 "cache file path fields must not contain path separators", "");
         }
-        return Path.of(getCacheDir(rt), "results", netName + "-" + rt.containerID + "-" + rt.ifName).toString();
+        return Path.of(getCacheDir(rt), "results-v2", cacheKey(netName, rt.containerID, rt.ifName)).toString();
+    }
+
+    /** Unambiguous cache key: hex SHA-256 of a JSON array of the three identity fields. */
+    static String cacheKey(String netName, String containerID, String ifName) {
+        String json = new Gson().toJson(List.of(netName, containerID, ifName));
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            return HexFormat.of().formatHex(md.digest(json.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 not available", e);
+        }
     }
 
     private void cacheAdd(Result result, String netName, RuntimeConf rt) {
         if (result == null) {
             return;
         }
-        String fname = getCacheFilePath(netName, rt);
+        JsonObject doc = new JsonObject();
+        doc.addProperty("kind", CACHE_KIND_V2);
+        doc.addProperty("networkName", netName);
+        doc.addProperty("containerId", rt.containerID);
+        doc.addProperty("ifName", rt.ifName);
+        doc.add("result", JsonParser.parseString(result.toJsonString()));
+
+        Path target = Path.of(getCacheFilePath(netName, rt));
         try {
-            Files.createDirectories(Path.of(fname).getParent());
-            Files.writeString(Path.of(fname), result.toJsonString());
+            Path dir = target.getParent();
+            Files.createDirectories(dir);
+            Path tmp = Files.createTempFile(dir, ".tmp-", null);
+            try {
+                Files.writeString(tmp, doc.toString());
+                try {
+                    Files.move(tmp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+                } catch (AtomicMoveNotSupportedException e) {
+                    Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING);
+                }
+            } finally {
+                Files.deleteIfExists(tmp);
+            }
         } catch (IOException e) {
             throw new CniError(CniErrorCode.IO_FAILURE,
                 "failed to set network \"" + netName + "\" cached result: " + e, "");
@@ -351,13 +392,30 @@ public class CNIConfig implements CNI {
             // The cached result may simply not exist on disk.
             return null;
         }
-        Result result;
+
+        JsonObject doc;
         try {
-            result = ResultFactory.createFromBytes(data);
+            doc = JsonParser.parseString(data).getAsJsonObject();
         } catch (RuntimeException e) {
             throw new CniError(CniErrorCode.DECODING_FAILURE,
-                "failed to unmarshal cached result: " + e.getMessage(), "");
+                "failed to unmarshal cached result: " + e.getMessage(), "", e);
         }
+
+        if (!CACHE_KIND_V2.equals(str(doc, "kind"))) {
+            throw new CniError(CniErrorCode.DECODING_FAILURE, "read cached result has wrong kind", "");
+        }
+        if (!netName.equals(str(doc, "networkName"))
+            || !rt.containerID.equals(str(doc, "containerId"))
+            || !rt.ifName.equals(str(doc, "ifName"))) {
+            // The entry declares a different identity than the one requested.
+            return null;
+        }
+
+        JsonElement resultEl = doc.get("result");
+        if (resultEl == null || resultEl.isJsonNull()) {
+            return null;
+        }
+        Result result = ResultFactory.createFromBytes(resultEl.toString());
         return result.getAsVersion(cniVersion);
     }
 
@@ -392,5 +450,10 @@ public class CNIConfig implements CNI {
 
     private static boolean containsPathSeparator(String s) {
         return s.indexOf('/') >= 0 || s.indexOf('\\') >= 0;
+    }
+
+    private static String str(JsonObject o, String key) {
+        JsonElement e = o.get(key);
+        return (e == null || e.isJsonNull()) ? null : e.getAsString();
     }
 }
