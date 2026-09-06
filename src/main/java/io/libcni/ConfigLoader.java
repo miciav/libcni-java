@@ -9,6 +9,7 @@ import com.google.gson.JsonSyntaxException;
 import io.libcni.types.CniError;
 import io.libcni.types.CniErrorCode;
 import io.libcni.types.PluginConf;
+import io.libcni.types.Result;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -233,7 +234,13 @@ public final class ConfigLoader {
                 throw new CniError(CniErrorCode.INVALID_NETWORK_CONFIG,
                     "key '" + key + "' value must not be nil", "");
             }
-            config.add(key, GSON.toJsonTree(value));
+            // Route Result values through their own version-aware serialization
+            // rather than Gson's field-based mapping.
+            if (value instanceof Result) {
+                config.add(key, JsonParser.parseString(((Result) value).toJsonString()));
+            } else {
+                config.add(key, GSON.toJsonTree(value));
+            }
         }
 
         return networkPluginConfFromBytes(GSON.toJson(config));

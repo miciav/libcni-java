@@ -132,4 +132,21 @@ class ConfigLoaderTest {
             ConfigLoader.networkConfFromBytes("{\"name\":\"mynet\",\"plugins\":[{\"type\":\"ok\"},123]}"));
         assertTrue(e.getMessage().contains("plugin config 1"));
     }
+
+    @Test
+    void injectConfPreservesInterfaceFieldsInPrevResult() {
+        PluginConfig original = ConfigLoader.networkPluginConfFromBytes("{\"type\":\"tuning\"}");
+        Result prev = ResultFactory.createFromBytes(
+            "{\"cniVersion\":\"1.1.0\",\"interfaces\":[{\"name\":\"eth0\",\"mtu\":1500,"
+                + "\"socketPath\":\"/run/x.sock\",\"pciID\":\"0000:00:1f.6\"}]}");
+
+        PluginConfig injected = ConfigLoader.injectConf(original, Map.of("prevResult", prev));
+
+        JsonObject prevResult = JsonParser.parseString(injected.bytes).getAsJsonObject()
+            .getAsJsonObject("prevResult");
+        JsonObject intf = prevResult.getAsJsonArray("interfaces").get(0).getAsJsonObject();
+        assertEquals(1500, intf.get("mtu").getAsInt());
+        assertEquals("/run/x.sock", intf.get("socketPath").getAsString());
+        assertEquals("0000:00:1f.6", intf.get("pciID").getAsString());
+    }
 }

@@ -1,13 +1,20 @@
 package io.libcni.types;
 
-import com.google.gson.Gson;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
 import java.util.ArrayList;
 import java.util.List;
 
 /**
- * The CNI result returned by plugins for spec versions 0.3.0 through 1.1.0,
- * which all share the same structure. Mirrors {@code types040.Result} and
- * {@code types100.Result} in libcni.
+ * The CNI result returned by plugins. Result versions split into two families
+ * with different schemas: 0.3.x/0.4.0 IPs carry an explicit {@code version}
+ * field and their interfaces lack {@code mtu}/{@code socketPath}/{@code pciID};
+ * 1.0.0/1.1.0 IPs omit {@code version} (it is implied by the address) and their
+ * interfaces may carry those fields.
+ *
+ * <p>This class stores the richest form and applies the family-specific rules at
+ * the JSON boundary ({@link #toJsonString()} and {@link ResultFactory}) and in
+ * {@link #getAsVersion(String)}.</p>
  */
 public class CurrentResult implements Result {
 
@@ -24,6 +31,15 @@ public class CurrentResult implements Result {
     public DNS dns;
 
     public CurrentResult() {
+    }
+
+    /** True for the 0.3.x/0.4.0 result family (explicit IP {@code version}). */
+    public static boolean isLegacyVersion(String version) {
+        return "0.3.0".equals(version) || "0.3.1".equals(version) || "0.4.0".equals(version);
+    }
+
+    private static boolean isCurrentVersion(String version) {
+        return "1.0.0".equals(version) || "1.1.0".equals(version);
     }
 
     @Override
@@ -47,18 +63,168 @@ public class CurrentResult implements Result {
                 "unsupported CNI result version \"" + version + "\"", "");
         }
 
+        boolean fromLegacy = isLegacyVersion(cniVersion);
+        boolean toLegacy = isLegacyVersion(version);
+
         CurrentResult r = new CurrentResult();
         r.cniVersion = version;
         r.dns = dns == null ? null : dns.copy();
         r.interfaces = copyInterfaces();
         r.ips = copyIps();
         r.routes = copyRoutes();
+
+        if (fromLegacy && !toLegacy) {
+            // Upgrade to 1.x: drop the explicit IP version (implied by the address).
+            if (r.ips != null) {
+                for (IPConfig ip : r.ips) {
+                    ip.version = null;
+                }
+            }
+        } else if (!fromLegacy && toLegacy) {
+            // Downgrade to 0.4.x: derive the IP version and drop 1.x-only interface fields.
+            if (r.ips != null) {
+                for (IPConfig ip : r.ips) {
+                    ip.version = IpAddress.ipVersionOf(ip.address);
+                }
+            }
+            if (r.interfaces != null) {
+                for (Interface i : r.interfaces) {
+                    i.mtu = null;
+                    i.socketPath = null;
+                    i.pciID = null;
+                }
+            }
+        }
+        // Same family: only the version changes; the types are identical.
         return r;
     }
 
     @Override
     public String toJsonString() {
-        return new Gson().toJson(this);
+        JsonObject o = new JsonObject();
+        if (cniVersion != null && !cniVersion.isEmpty()) {
+            o.addProperty("cniVersion", cniVersion);
+        }
+        boolean legacy = isLegacyVersion(cniVersion == null ? IMPLEMENTED_SPEC_VERSION : cniVersion);
+
+        if (interfaces != null && !interfaces.isEmpty()) {
+            JsonArray arr = new JsonArray();
+            for (Interface i : interfaces) {
+                arr.add(interfaceToJson(i, legacy));
+            }
+            o.add("interfaces", arr);
+        }
+        if (ips != null && !ips.isEmpty()) {
+            JsonArray arr = new JsonArray();
+            for (IPConfig ip : ips) {
+                arr.add(ipConfigToJson(ip, legacy));
+            }
+            o.add("ips", arr);
+        }
+        if (routes != null && !routes.isEmpty()) {
+            JsonArray arr = new JsonArray();
+            for (Route r : routes) {
+                arr.add(routeToJson(r));
+            }
+            o.add("routes", arr);
+        }
+        if (dns != null && !dns.isEmpty()) {
+            o.add("dns", dnsToJson(dns));
+        }
+        return o.toString();
+    }
+
+    private static JsonObject interfaceToJson(Interface i, boolean legacy) {
+        JsonObject o = new JsonObject();
+        if (i.name != null) {
+            o.addProperty("name", i.name);
+        }
+        if (i.mac != null && !i.mac.isEmpty()) {
+            o.addProperty("mac", i.mac);
+        }
+        if (!legacy) {
+            if (i.mtu != null && i.mtu != 0) {
+                o.addProperty("mtu", i.mtu);
+            }
+            if (i.socketPath != null && !i.socketPath.isEmpty()) {
+                o.addProperty("socketPath", i.socketPath);
+            }
+            if (i.pciID != null && !i.pciID.isEmpty()) {
+                o.addProperty("pciID", i.pciID);
+            }
+        }
+        if (i.sandbox != null && !i.sandbox.isEmpty()) {
+            o.addProperty("sandbox", i.sandbox);
+        }
+        return o;
+    }
+
+    private static JsonObject ipConfigToJson(IPConfig ip, boolean legacy) {
+        JsonObject o = new JsonObject();
+        if (legacy) {
+            String v = ip.version;
+            if (v == null || v.isEmpty()) {
+                v = IpAddress.ipVersionOf(ip.address);
+            }
+            o.addProperty("version", v);
+        }
+        if (ip.iface != null) {
+            o.addProperty("interface", ip.iface);
+        }
+        if (ip.address != null) {
+            o.addProperty("address", ip.address);
+        }
+        if (ip.gateway != null && !ip.gateway.isEmpty()) {
+            o.addProperty("gateway", ip.gateway);
+        }
+        return o;
+    }
+
+    private static JsonObject routeToJson(Route r) {
+        JsonObject o = new JsonObject();
+        if (r.dst != null) {
+            o.addProperty("dst", r.dst);
+        }
+        if (r.gw != null && !r.gw.isEmpty()) {
+            o.addProperty("gw", r.gw);
+        }
+        if (r.mtu != null) {
+            o.addProperty("mtu", r.mtu);
+        }
+        if (r.advmss != null) {
+            o.addProperty("advmss", r.advmss);
+        }
+        if (r.priority != null) {
+            o.addProperty("priority", r.priority);
+        }
+        if (r.table != null) {
+            o.addProperty("table", r.table);
+        }
+        if (r.scope != null) {
+            o.addProperty("scope", r.scope);
+        }
+        return o;
+    }
+
+    private static JsonObject dnsToJson(DNS d) {
+        JsonObject o = new JsonObject();
+        addStringArray(o, "nameservers", d.nameservers);
+        if (d.domain != null && !d.domain.isEmpty()) {
+            o.addProperty("domain", d.domain);
+        }
+        addStringArray(o, "search", d.search);
+        addStringArray(o, "options", d.options);
+        return o;
+    }
+
+    private static void addStringArray(JsonObject o, String key, List<String> values) {
+        if (values != null && !values.isEmpty()) {
+            JsonArray arr = new JsonArray();
+            for (String v : values) {
+                arr.add(v);
+            }
+            o.add(key, arr);
+        }
     }
 
     private List<Interface> copyInterfaces() {
