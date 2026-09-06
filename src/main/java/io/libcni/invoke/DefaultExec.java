@@ -24,6 +24,11 @@ public class DefaultExec implements Exec {
         this.pluginDecoder = pluginDecoder;
     }
 
+    /** Convenience constructor applying a per-invocation timeout (in milliseconds). */
+    public DefaultExec(long timeoutMillis) {
+        this(new RawExec(timeoutMillis), new PluginDecoder());
+    }
+
     @Override
     public byte[] execPlugin(String pluginPath, byte[] stdinData, Map<String, String> environ) {
         return rawExec.execPlugin(pluginPath, stdinData, environ);
