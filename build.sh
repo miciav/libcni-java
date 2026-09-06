@@ -5,25 +5,31 @@
 #
 # Usage:
 #   ./build.sh            compile everything and run the tests
-#   ./build.sh deps       download the dependency jars into lib/
+#   ./build.sh deps       download the dependency jars into lib/ (checksum-verified)
 set -euo pipefail
 cd "$(dirname "$0")"
+
+# shellcheck source=scripts/fetch.sh
+source "$PWD/scripts/fetch.sh"
 
 # ---- dependency download -------------------------------------------------
 if [[ "${1:-}" == "deps" ]]; then
   mkdir -p lib
   GSON=2.11.0
   JUNIT=1.10.3
-  fetch() { # fetch <url> <out>
-    if [[ -f "$2" ]]; then
-      echo "exists  $2"
-    else
-      code=$(curl -sS -m 60 -o "$2" -w "%{http_code}" "$1")
-      echo "$code  $2"
-    fi
-  }
-  fetch "https://repo1.maven.org/maven2/com/google/code/gson/gson/$GSON/gson-$GSON.jar" "lib/gson-$GSON.jar"
-  fetch "https://repo1.maven.org/maven2/org/junit/platform/junit-platform-console-standalone/$JUNIT/junit-platform-console-standalone-$JUNIT.jar" "lib/junit-platform-console-standalone-$JUNIT.jar"
+  fetch_dependency "https://repo1.maven.org/maven2/com/google/code/gson/gson/$GSON/gson-$GSON.jar" \
+    "lib/gson-$GSON.jar" \
+    "57928d6e5a6edeb2abd3770a8f95ba44dce45f3b23b7a9dc2b309c581552a78b" || {
+      echo "error: failed to fetch gson" >&2
+      exit 1
+    }
+  fetch_dependency "https://repo1.maven.org/maven2/org/junit/platform/junit-platform-console-standalone/$JUNIT/junit-platform-console-standalone-$JUNIT.jar" \
+    "lib/junit-platform-console-standalone-$JUNIT.jar" \
+    "1455afad75d4eb4f44b493febc4a1bc32bc5f02eb25679361abd55e0f6421050" || {
+      echo "error: failed to fetch junit" >&2
+      exit 1
+    }
+  echo "dependencies ok"
   exit 0
 fi
 

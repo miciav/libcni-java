@@ -28,8 +28,10 @@ import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Default {@link CNI} implementation, mirroring {@code libcni.CNIConfig} in the
@@ -45,7 +47,7 @@ public class CNIConfig implements CNI {
 
     private final List<String> path;
     private final String cacheDir;
-    private Exec exec;
+    private final Exec exec;
 
     public CNIConfig(List<String> path, Exec exec) {
         this(path, null, exec);
@@ -54,7 +56,7 @@ public class CNIConfig implements CNI {
     public CNIConfig(List<String> path, String cacheDir, Exec exec) {
         this.path = path == null ? List.of() : List.copyOf(path);
         this.cacheDir = cacheDir;
-        this.exec = exec;
+        this.exec = exec != null ? exec : new DefaultExec();
     }
 
     // ------------------------------------------------------------------
@@ -158,7 +160,7 @@ public class CNIConfig implements CNI {
 
     @Override
     public List<String> validateNetworkList(NetworkConfigList list) {
-        List<String> caps = new ArrayList<>();
+        Set<String> caps = new LinkedHashSet<>();
         List<String> errs = new ArrayList<>();
         for (PluginConfig net : list.plugins) {
             try {
@@ -168,7 +170,7 @@ public class CNIConfig implements CNI {
             }
             if (net.network.capabilities != null) {
                 for (Map.Entry<String, Boolean> en : net.network.capabilities.entrySet()) {
-                    if (Boolean.TRUE.equals(en.getValue()) && !caps.contains(en.getKey())) {
+                    if (Boolean.TRUE.equals(en.getValue())) {
                         caps.add(en.getKey());
                     }
                 }
@@ -177,7 +179,7 @@ public class CNIConfig implements CNI {
         if (!errs.isEmpty()) {
             throw new CniError(CniErrorCode.INVALID_NETWORK_CONFIG, String.join(", ", errs), "");
         }
-        return caps;
+        return new ArrayList<>(caps);
     }
 
     @Override
@@ -195,7 +197,6 @@ public class CNIConfig implements CNI {
     }
 
     private void validatePlugin(String pluginName, String expectedVersion) {
-        ensureExec();
         String pluginPath = exec.findInPath(pluginName, path);
         if (expectedVersion == null || expectedVersion.isEmpty()) {
             expectedVersion = "0.1.0";
@@ -212,7 +213,6 @@ public class CNIConfig implements CNI {
 
     @Override
     public PluginInfo getVersionInfo(String pluginType) {
-        ensureExec();
         String pluginPath = exec.findInPath(pluginType, path);
         return Invoke.getVersionInfo(pluginPath, exec);
     }
@@ -222,7 +222,6 @@ public class CNIConfig implements CNI {
     // ------------------------------------------------------------------
 
     private Result addNetwork(String name, String cniVersion, PluginConfig net, Result prevResult, RuntimeConf rt) {
-        ensureExec();
         String pluginPath = exec.findInPath(net.network.type, path);
         Validation.validateContainerID(rt.containerID);
         Validation.validateNetworkName(name);
@@ -233,14 +232,12 @@ public class CNIConfig implements CNI {
     }
 
     private void checkNetwork(String name, String cniVersion, PluginConfig net, Result prevResult, RuntimeConf rt) {
-        ensureExec();
         String pluginPath = exec.findInPath(net.network.type, path);
         PluginConfig newConf = buildOneConfig(name, cniVersion, net, prevResult, rt);
         Invoke.execPluginWithoutResult(pluginPath, newConf.bytes, args("CHECK", rt), exec);
     }
 
     private void delNetwork(String name, String cniVersion, PluginConfig net, Result prevResult, RuntimeConf rt) {
-        ensureExec();
         String pluginPath = exec.findInPath(net.network.type, path);
         PluginConfig newConf = buildOneConfig(name, cniVersion, net, prevResult, rt);
         Invoke.execPluginWithoutResult(pluginPath, newConf.bytes, args("DEL", rt), exec);
@@ -253,16 +250,16 @@ public class CNIConfig implements CNI {
         if (prevResult != null) {
             inject.put("prevResult", prevResult);
         }
-        PluginConfig conf = ConfigLoader.injectConf(orig, inject);
-        if (rt != null) {
-            return injectRuntimeConfig(conf, rt);
+        Map<String, Object> rc = collectRuntimeConfig(orig, rt);
+        if (!rc.isEmpty()) {
+            inject.put("runtimeConfig", rc);
         }
-        return conf;
+        return ConfigLoader.injectConf(orig, inject);
     }
 
-    private PluginConfig injectRuntimeConfig(PluginConfig orig, RuntimeConf rt) {
+    private Map<String, Object> collectRuntimeConfig(PluginConfig orig, RuntimeConf rt) {
         Map<String, Object> rc = new LinkedHashMap<>();
-        if (orig.network.capabilities != null) {
+        if (rt != null && orig.network.capabilities != null) {
             for (Map.Entry<String, Boolean> en : orig.network.capabilities.entrySet()) {
                 if (Boolean.TRUE.equals(en.getValue())
                     && rt.capabilityArgs != null && rt.capabilityArgs.containsKey(en.getKey())) {
@@ -270,10 +267,7 @@ public class CNIConfig implements CNI {
                 }
             }
         }
-        if (!rc.isEmpty()) {
-            return ConfigLoader.injectConf(orig, Map.of("runtimeConfig", rc));
-        }
-        return orig;
+        return rc;
     }
 
     private Args args(String action, RuntimeConf rt) {
@@ -285,12 +279,6 @@ public class CNIConfig implements CNI {
         a.ifName = rt.ifName;
         a.path = String.join(File.pathSeparator, path);
         return a;
-    }
-
-    private void ensureExec() {
-        if (exec == null) {
-            exec = new DefaultExec();
-        }
     }
 
     private static String pluginDescription(PluginConf net) {

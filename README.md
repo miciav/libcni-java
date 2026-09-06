@@ -56,8 +56,8 @@ cni.delNetworkList(list, rt);                   // CNI DEL (reverse order)
 |------|-------|
 | `CNI` / `CNIConfig` | `addNetwork(List)`, `delNetwork(List)`, `checkNetwork(List)`, `validateNetwork(List)`, `getVersionInfo`, result caching |
 | Config loading | `.conflist` and legacy `.conf` parsing, `loadNetworkConf`, `injectConf`, `confListFromConf` |
-| Plugin invocation | `Exec`/`DefaultExec`/`RawExec`, `CNI_*` env, `prevResult` chaining, result version fixup, `VERSION` detection |
-| Result model | `Result`/`CurrentResult` (spec 0.3.0–1.1.0), `Interface`, `IPConfig`, `Route`, `DNS`, version conversion |
+| Plugin invocation | `Exec`/`DefaultExec`/`RawExec`, `CNI_*` env, `prevResult` chaining, result version fixup, `VERSION` detection, configurable per-invocation timeout |
+| Result model | `Result`/`CurrentResult` (spec 0.3.0–1.1.0), `Interface`, `IPConfig`, `Route`, `DNS`, family-aware version conversion |
 | Types | `PluginConf`, `CniError` + error codes, `PluginInfo` |
 | Validation | container ID, network name, interface name |
 
@@ -66,8 +66,33 @@ cni.delNetworkList(list, rt);                   // CNI DEL (reverse order)
 - `GC` / `STATUS` commands (CNI 1.1.0)
 - Legacy result versions 0.1.0 / 0.2.0 (parsing and conversion)
 - The `cniVersions` multi-version config negotiation
-- `GetCachedAttachments` and the full `cachedInfo` cache format (only the
-  result itself is cached, which is all ADD/DEL/CHECK need)
+- `GetCachedAttachments` and the full upstream `cachedInfo` cache format
+
+## Notes
+
+**Timeouts** — `RawExec` (and `DefaultExec`) accept a per-invocation timeout in
+milliseconds; `0` (the default) means no limit. On timeout or thread interrupt
+the plugin process and its discoverable descendants are terminated, and the
+caller's interrupt status is preserved:
+
+```java
+DefaultExec exec = new DefaultExec(30_000); // 30s per plugin invocation
+```
+
+**Result conversion** — 0.3.x/0.4.0 and 1.0.0/1.1.0 are handled as two result
+families. Downgrading 1.x → 0.4.0 derives `ips[].version` from the address
+(rejecting invalid IPs, without DNS); upgrading drops `version` and keeps
+`mtu`/`socketPath`/`pciID` only for the 1.x family.
+
+**Cache** — results are cached under `results-v2/<sha256>` where the key is the
+SHA-256 of a JSON array of `(network, container, ifname)`. Entries store their
+identity and verify it on read, and are written via a temp file + atomic rename.
+Legacy `results/` files from older versions are neither read nor deleted; after
+upgrading, drain and recreate attachments so DEL/CHECK can find their cached
+results.
+
+**Errors** — public JSON-decoding boundaries throw `CniError` (with the original
+parse exception preserved via `getCause()`) rather than leaking `JsonSyntaxException`.
 
 ## Package layout
 
