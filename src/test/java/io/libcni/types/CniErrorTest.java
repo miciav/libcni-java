@@ -2,6 +2,7 @@ package io.libcni.types;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -36,5 +37,12 @@ class CniErrorTest {
         assertEquals(5, e.code());
         assertEquals("io", e.msg());
         assertEquals("d", e.details());
+    }
+
+    @Test
+    void carriesCause() {
+        RuntimeException cause = new RuntimeException("boom");
+        CniError e = new CniError(CniErrorCode.DECODING_FAILURE, "msg", "", cause);
+        assertSame(cause, e.getCause());
     }
 }

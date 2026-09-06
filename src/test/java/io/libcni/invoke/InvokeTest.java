@@ -1,6 +1,7 @@
 package io.libcni.invoke;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.libcni.types.CniError;
@@ -105,5 +106,33 @@ class InvokeTest {
         PluginInfo pi = Invoke.getVersionInfo("/x/bridge", fe);
 
         assertEquals(List.of("0.1.0"), pi.supportedVersions());
+    }
+
+    @Test
+    void fixupResultVersionRejectsNonObjectResponses() {
+        String netconf = "{\"cniVersion\":\"0.4.0\"}";
+        assertThrows(CniError.class, () -> Invoke.fixupResultVersion(netconf, ""));
+        assertThrows(CniError.class, () -> Invoke.fixupResultVersion(netconf, "   "));
+        assertThrows(CniError.class, () -> Invoke.fixupResultVersion(netconf, "[]"));
+        assertThrows(CniError.class, () -> Invoke.fixupResultVersion(netconf, "42"));
+        assertThrows(CniError.class, () -> Invoke.fixupResultVersion(netconf, "null"));
+        assertThrows(CniError.class, () -> Invoke.fixupResultVersion(netconf, "{bad"));
+    }
+
+    @Test
+    void fixupResultVersionAcceptsEmptyObject() {
+        String[] r = Invoke.fixupResultVersion("{\"cniVersion\":\"0.4.0\"}", "{}");
+        assertEquals("0.4.0", r[0]);
+    }
+
+    @Test
+    void execPluginWithResultWrapsInvalidResultWithPluginContext() {
+        FakeExec fe = new FakeExec();
+        fe.stdout = "[]".getBytes(StandardCharsets.UTF_8);
+
+        CniError e = assertThrows(CniError.class,
+            () -> Invoke.execPluginWithResult("/x/bridge", "{\"cniVersion\":\"0.4.0\"}", addArgs(), fe));
+
+        assertTrue(e.getMessage().contains("bridge"));
     }
 }

@@ -3,6 +3,7 @@ package io.libcni.types;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.google.gson.JsonSyntaxException;
 import java.util.Arrays;
 
 /**
@@ -19,7 +20,13 @@ public final class ResultFactory {
      * {@code "0.1.0"} when none is declared (per the CNI spec).
      */
     public static String decodeVersion(String json) {
-        JsonObject o = JsonParser.parseString(json).getAsJsonObject();
+        JsonObject o;
+        try {
+            o = JsonParser.parseString(json).getAsJsonObject();
+        } catch (JsonSyntaxException | IllegalStateException e) {
+            throw new CniError(CniErrorCode.DECODING_FAILURE,
+                "decoding version from network config: " + e.getMessage(), "", e);
+        }
         if (!o.has("cniVersion")) {
             return "0.1.0";
         }
@@ -40,7 +47,13 @@ public final class ResultFactory {
             throw new CniError(CniErrorCode.INCOMPATIBLE_CNI_VERSION,
                 "unsupported CNI result version \"" + version + "\"", "");
         }
-        CurrentResult r = new Gson().fromJson(json, CurrentResult.class);
+        CurrentResult r;
+        try {
+            r = new Gson().fromJson(json, CurrentResult.class);
+        } catch (JsonSyntaxException e) {
+            throw new CniError(CniErrorCode.DECODING_FAILURE,
+                "failed to unmarshal result: " + e.getMessage(), "", e);
+        }
         if (r.cniVersion == null || r.cniVersion.isEmpty()) {
             r.cniVersion = version;
         }

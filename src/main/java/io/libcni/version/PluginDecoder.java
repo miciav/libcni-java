@@ -4,6 +4,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.google.gson.JsonSyntaxException;
 import io.libcni.types.CniError;
 import io.libcni.types.CniErrorCode;
 import java.util.ArrayList;
@@ -16,7 +17,13 @@ import java.util.List;
 public class PluginDecoder {
 
     public PluginInfo decode(String jsonBytes) {
-        JsonObject o = JsonParser.parseString(jsonBytes).getAsJsonObject();
+        JsonObject o;
+        try {
+            o = JsonParser.parseString(jsonBytes).getAsJsonObject();
+        } catch (JsonSyntaxException | IllegalStateException e) {
+            throw new CniError(CniErrorCode.DECODING_FAILURE,
+                "decoding version info: " + e.getMessage(), "", e);
+        }
         if (!o.has("cniVersion") || o.get("cniVersion").isJsonNull()) {
             throw new CniError(CniErrorCode.DECODING_FAILURE,
                 "decoding version info: missing field cniVersion", "");

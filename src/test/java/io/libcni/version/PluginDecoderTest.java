@@ -1,6 +1,7 @@
 package io.libcni.version;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import io.libcni.types.CniError;
@@ -40,5 +41,11 @@ class PluginDecoderTest {
         PluginInfo i = PluginInfo.pluginSupports("0.1.0", "0.2.0");
         assertEquals(Arrays.asList("0.1.0", "0.2.0"), i.supportedVersions());
         assertEquals(Version.current(), i.cniVersion());
+    }
+
+    @Test
+    void decodeRejectsMalformedJson() {
+        CniError e = assertThrows(CniError.class, () -> new PluginDecoder().decode("{"));
+        assertNotNull(e.getCause());
     }
 }

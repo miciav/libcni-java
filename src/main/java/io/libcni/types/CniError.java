@@ -27,6 +27,13 @@ public class CniError extends RuntimeException {
         this.details = details;
     }
 
+    public CniError(int code, String msg, String details, Throwable cause) {
+        super(buildMessage(msg, details), cause);
+        this.code = code;
+        this.msg = msg;
+        this.details = details;
+    }
+
     public int code() {
         return code;
     }

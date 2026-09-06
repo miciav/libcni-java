@@ -1,6 +1,7 @@
 package io.libcni;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -117,5 +118,18 @@ class ConfigLoaderTest {
         Files.writeString(dir.resolve("10-mynet.conflist"), CONFLIST);
 
         assertThrows(CniError.class, () -> ConfigLoader.loadNetworkConf(dir.toString(), "othernet"));
+    }
+
+    @Test
+    void networkPluginConfFromBytesRejectsMalformedJson() {
+        CniError e = assertThrows(CniError.class, () -> ConfigLoader.networkPluginConfFromBytes("{"));
+        assertNotNull(e.getCause());
+    }
+
+    @Test
+    void networkConfFromBytesPreservesPluginIndexOnMalformedPlugin() {
+        CniError e = assertThrows(CniError.class, () ->
+            ConfigLoader.networkConfFromBytes("{\"name\":\"mynet\",\"plugins\":[{\"type\":\"ok\"},123]}"));
+        assertTrue(e.getMessage().contains("plugin config 1"));
     }
 }

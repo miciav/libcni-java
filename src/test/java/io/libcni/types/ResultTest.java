@@ -1,6 +1,7 @@
 package io.libcni.types;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -71,5 +72,11 @@ class ResultTest {
 
         assertEquals("1.0.0", reparsed.version());
         assertEquals("fd00::1/64", reparsed.ips.get(0).address);
+    }
+
+    @Test
+    void createFromBytesRejectsMalformedJson() {
+        CniError e = assertThrows(CniError.class, () -> ResultFactory.createFromBytes("{"));
+        assertNotNull(e.getCause());
     }
 }

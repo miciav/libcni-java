@@ -4,7 +4,9 @@ import com.google.gson.Gson;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.google.gson.JsonSyntaxException;
 import io.libcni.types.CniError;
+import io.libcni.types.CniErrorCode;
 import io.libcni.types.Result;
 import io.libcni.types.ResultFactory;
 import io.libcni.version.PluginInfo;
@@ -23,8 +25,13 @@ public final class Invoke {
     public static Result execPluginWithResult(String pluginPath, String netconf, Args args, Exec exec) {
         Exec e = exec != null ? exec : new DefaultExec();
         byte[] stdout = e.execPlugin(pluginPath, netconf.getBytes(StandardCharsets.UTF_8), args.asEnv());
-        String[] fixed = fixupResultVersion(netconf, new String(stdout, StandardCharsets.UTF_8));
-        return ResultFactory.create(fixed[0], fixed[1]);
+        try {
+            String[] fixed = fixupResultVersion(netconf, new String(stdout, StandardCharsets.UTF_8));
+            return ResultFactory.create(fixed[0], fixed[1]);
+        } catch (CniError ce) {
+            throw new CniError(ce.code(),
+                "plugin " + pluginPath + " returned invalid result: " + ce.msg(), ce.details(), ce);
+        }
     }
 
     /** Executes a plugin whose stdout is ignored. */
@@ -66,8 +73,18 @@ public final class Invoke {
     static String[] fixupResultVersion(String netconf, String result) {
         String confVersion = ResultFactory.decodeVersion(netconf);
 
-        JsonElement el = JsonParser.parseString(result);
-        JsonObject raw = el.isJsonObject() ? el.getAsJsonObject() : new JsonObject();
+        JsonElement el;
+        try {
+            el = JsonParser.parseString(result);
+        } catch (JsonSyntaxException e) {
+            throw new CniError(CniErrorCode.DECODING_FAILURE,
+                "failed to unmarshal raw result: " + e.getMessage(), "", e);
+        }
+        if (!el.isJsonObject()) {
+            throw new CniError(CniErrorCode.DECODING_FAILURE,
+                "failed to unmarshal raw result: expected a JSON object", "");
+        }
+        JsonObject raw = el.getAsJsonObject();
 
         if (raw.has("cniVersion")) {
             JsonElement v = raw.get("cniVersion");

@@ -5,6 +5,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.google.gson.JsonSyntaxException;
 import io.libcni.types.CniError;
 import io.libcni.types.CniErrorCode;
 import io.libcni.types.PluginConf;
@@ -33,7 +34,13 @@ public final class ConfigLoader {
      * JSON is malformed or the required {@code type} field is missing.
      */
     public static PluginConfig networkPluginConfFromBytes(String bytes) {
-        PluginConf conf = GSON.fromJson(bytes, PluginConf.class);
+        PluginConf conf;
+        try {
+            conf = GSON.fromJson(bytes, PluginConf.class);
+        } catch (JsonSyntaxException e) {
+            throw new CniError(CniErrorCode.INVALID_NETWORK_CONFIG,
+                "error parsing configuration: " + e.getMessage(), "", e);
+        }
         if (conf == null) {
             conf = new PluginConf();
         }
