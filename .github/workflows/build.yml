@@ -12,6 +12,7 @@ concurrency:
 
 permissions:
   contents: read
+  packages: write
 
 jobs:
   unit:
@@ -66,3 +67,26 @@ jobs:
           name: native-test-report
           path: build/reports/tests
           retention-days: 7
+
+  publish:
+    name: publish to GitHub Packages
+    # Only once both jobs agree the library works, and only from the default branch: a package is
+    # not something to take back, and containerd-java resolves it from here.
+    needs: [unit, native]
+    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      - name: Publish
+        run: ./gradlew publishAllPublicationsToGitHubPackagesRepository --stacktrace
+        env:
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -19,6 +19,29 @@ the Go library can map it directly.
 ./gradlew publishToMavenLocal   # installs io.libcni:libcni-java for local consumers
 ```
 
+## Consuming it
+
+Releases are published to GitHub Packages by CI, from the default branch, once the tests pass
+both on the JVM and as a native image.
+
+```kotlin
+repositories {
+    maven {
+        url = uri("https://maven.pkg.github.com/miciav/libcni-java")
+        credentials {
+            username = System.getenv("GITHUB_ACTOR")
+            password = System.getenv("GITHUB_TOKEN")   // needs read:packages
+        }
+    }
+}
+dependencies {
+    implementation("io.libcni:libcni-java:0.1.0")
+}
+```
+
+GitHub Packages requires authentication even for public packages, unlike Maven Central — a token
+with `read:packages` is needed to resolve this, not only to publish it.
+
 The build was a `build.sh` driving `javac` directly, which kept the project
 free of a build tool but also meant it could not be depended on: there was no
 artifact to resolve. Gradle replaces it — same sources, same 105 tests — so
