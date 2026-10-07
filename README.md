@@ -21,9 +21,8 @@ the Go library can map it directly.
 
 ## Consuming it
 
-The first Maven Central release is prepared as
-`io.github.nanofaas:libcni-java:0.24.0`. It becomes available after the namespace
-and signing credentials are configured and the `v0.24.0` release workflow succeeds.
+The library is available on Maven Central as
+`io.github.nanofaas:libcni-java:0.24.0`, without download credentials.
 CI publishes from a matching `v*` tag only, after JVM and native tests pass.
 
 ```kotlin
