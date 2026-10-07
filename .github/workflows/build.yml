@@ -4,7 +4,7 @@ on:
   push:
     branches: [main, master]
     # A release version is published from a tag, never from a push: the version is
-    # a fixed number now, and GitHub Packages will not accept the same one twice,
+    # a fixed number now, and Maven Central will not accept the same one twice,
     # so a push-triggered publish would fail on the second commit. Pushes to the
     # default branch still build and test; only a tag publishes.
     tags: ["v*"]
@@ -17,7 +17,6 @@ concurrency:
 
 permissions:
   contents: read
-  packages: write
 
 jobs:
   unit:
@@ -74,9 +73,9 @@ jobs:
           retention-days: 7
 
   publish:
-    name: publish to GitHub Packages
+    name: publish to Maven Central
     # Only once both jobs agree the library works, and only for a tag: a package is not
-    # something to take back, and containerd-java resolves it from here.
+    # something to take back, and containerd-java resolves it from Central.
     needs: [unit, native]
     if: startsWith(github.ref, 'refs/tags/v') && github.event_name == 'push'
     runs-on: ubuntu-latest
@@ -108,7 +107,9 @@ jobs:
           echo "tag $GITHUB_REF_NAME matches version $version"
 
       - name: Publish
-        run: ./gradlew publishAllPublicationsToGitHubPackagesRepository --stacktrace
+        run: ./gradlew publishAggregationToCentralPortal --stacktrace
         env:
-          GITHUB_ACTOR: ${{ github.actor }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}

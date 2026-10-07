@@ -16,31 +16,27 @@ the Go library can map it directly.
 
 ```bash
 ./gradlew build                 # compiles and runs all tests
-./gradlew publishToMavenLocal   # installs io.libcni:libcni-java for local consumers
+./gradlew publishToMavenLocal   # installs io.github.nanofaas:libcni-java for local consumers
 ```
 
 ## Consuming it
 
-Releases are published to GitHub Packages by CI, from the default branch, once the tests pass
-both on the JVM and as a native image.
+The first Maven Central release is prepared as
+`io.github.nanofaas:libcni-java:0.24.0`. It becomes available after the namespace
+and signing credentials are configured and the `v0.24.0` release workflow succeeds.
+CI publishes from a matching `v*` tag only, after JVM and native tests pass.
 
 ```kotlin
-repositories {
-    maven {
-        url = uri("https://maven.pkg.github.com/Nanofaas/libcni-java")
-        credentials {
-            username = System.getenv("GITHUB_ACTOR")
-            password = System.getenv("GITHUB_TOKEN")   // needs read:packages
-        }
-    }
-}
+repositories { mavenCentral() }
 dependencies {
-    implementation("io.libcni:libcni-java:0.23.0")
+    implementation("io.github.nanofaas:libcni-java:0.24.0")
 }
 ```
 
-GitHub Packages requires authentication even for public packages, unlike Maven Central — a token
-with `read:packages` is needed to resolve this, not only to publish it.
+Downloads from Maven Central require no credentials. The previous
+`io.libcni:libcni-java:0.23.0` release remains on GitHub Packages and still requires
+package-read credentials. See [publishing](docs/publishing.md) for the one-time
+Sonatype setup and the migration order.
 
 The build was a `build.sh` driving `javac` directly, which kept the project
 free of a build tool but also meant it could not be depended on: there was no
